@@ -1,0 +1,125 @@
+---
+title: "Practical Machine learning peer assignment project"
+author: "Tak Au"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: 
+  html_document: 
+    keep_md: yes
+    
+---
+
+### Summary  
+  
+Using data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants, we try to quantify the performance of each exercises. The participants were asked to performance barbell lifts correctly and incorrectly in 5 different ways.  
+  
+A random forest method in the R caret package will be used to build the predictive model and we will also cross validate the accuracy of the model. The so called k-fold cross-validation, the samples are randomly partitioned into k sets (called folds) of roughly equal size. A model is fit using all the samples except the first subset. Then, the prediction error of the fitted model is calculated using the first held-out samples. The same operation is repeated for each fold and the model's performance is calculated by averaging the errors across the different test sets. K is usually fixed at 5 or 10 . Cross-validation provides an estimate of the test error for each model. Cross-validation is one of the most widely-used method for model selection, and for choosing tuning parameter values.  
+
+Details of the datasets can be found in the README.md document. 
+  
+  
+### House keeping  
+```{r global_options}
+knitr::opts_chunk$set(fig.width = 12, fig.height = 8, fig.path = "Figs/", warning = FALSE, message = FALSE)
+```
+
+initiate required packages  
+```{r}
+library(caret)
+library(doParallel)
+library(mlbench)
+```
+load the datasets to RStudio  
+```{r}
+trainSet <- read.csv("~/pml-training.csv ", header = TRUE, sep = ",")
+
+testSet <- read.csv("~/pml-testing.csv", header = TRUE, sep = ",")
+```
+examin the data
+```{r eval = FALSE}
+dim(trainSet)
+summary(trainSet)
+dim(testSet)
+summary(testSet)
+```
+The trainSet has 19622 observations and 160 variables and the testSet has 20 observations and 160 variables. However, there are many NA's (missing value) in both sets.  
+We'll remove the variables that contain more then 80% of missing data.
+```{r}
+trainSet <- trainSet[, -which(colMeans(is.na(trainSet)) > 0.80)]
+sum(is.na(trainSet))
+
+testSet <- testSet[, -which(colMeans(is.na(testSet)) > 0.80)]
+sum(is.na(testSet))
+```
+No more missing data in both sets.  
+  
+Now, we'll subset only data from accelerometers on the belt, forearm, arm, and dumbell as predictors for this project.  
+```{r}
+tr <- trainSet[, c("classe", colnames(trainSet)[grep("belt|arm|dumbbell", colnames(trainSet))])]
+
+ts <- testSet[, c(colnames(testSet)[grep("belt|arm|dumbbell", colnames(testSet))])] 
+```
+Next, we are going to eliminate predictors that has zero or near-zero-variance. It means these variables would have constant value. For these variables which is constant for all observations, there is nothing to compute differences over. They are not adding value to the model.
+```{r}
+nzv <- nearZeroVar(tr)
+tr <- tr[, -nzv]
+```
+give one more glance of the sets  
+```{r}
+dim(tr)
+dim(ts)
+```
+Finally, we can build our model.  
+  
+### Operation  
+  
+splitting up the tr dataset: using 3/4 of the data for training and 1/4 for testing  
+```{r}
+set.seed(7525)
+inTraining <- createDataPartition(tr$classe, p = 0.75, list=FALSE)
+trTrain <- tr[inTraining, ]
+trTest <- tr[-inTraining,]
+```
+setting up k = 5 fold cross validation to estimate model accuracy  
+```{r}
+fitControl <- trainControl(method = "cv", number = 5, allowParallel = TRUE, verboseIter = TRUE)
+```
+setting up parallel computing  
+```{r}
+cluster <- makeCluster(detectCores() - 1) # leave 1 core for OS
+registerDoParallel(cluster)
+```
+Random forest model building  
+```{r}
+system.time(modrf <- train(classe ~., data = trTrain, method = "rf", trControl = fitControl))
+```
+
+```{r}
+stopCluster(cluster)  #stop paralled computing
+```
+How accurate is the model?  
+```{r}
+confusionMatrix.train(modrf) 
+plot(modrf$finalModel)
+```
+The in sample accuracy is 0.992.  
+```{r}
+predictrf <- predict(modrf, trTest)
+confusionMatrix(predictrf, trTest$classe)
+```
+The out of sample accuracy is, with 95% confindence, between 0.991 and 0.996. less than 1 % error.  
+  
+At last, we will apply the machine learning algorithm to the 20 test cases available in the test data.  
+```{r}
+predict(modrf, ts)
+```
+Here are the 10 most significant predictors.  
+
+```{r}
+imp.predictor <- varImp(modrf, scale = FALSE, 10)
+plot(imp.predictor, top = 10)
+```
+
+```{r}
+sessionInfo()
+```
+
